@@ -1,0 +1,404 @@
+#define _CRT_SECURE_NO_DEPRECATE
+
+#include <stdio.h>
+#include <windows.h>
+#include <cstdlib>
+#include <iostream>
+#include <ctime>
+#include <cmath>
+#include <gl/gl.h>
+#include <gl/glut.h>
+
+#ifndef PI
+#define PI 3.14159265358979323846
+#endif
+
+typedef float point3[3];
+typedef float point2[2];
+static GLfloat viewer[] = { 0.0, 0.0, 15.0 };
+
+static GLfloat pixels2angle;
+
+static GLfloat rotation_x = 0.0;
+static GLfloat rotation_y = 0.0;
+
+static bool left_pressed = false;
+static bool right_pressed = false;
+
+static int x_pos_old = 0;
+static int y_pos_old = 0;
+
+static int delta_x = 0;
+static int delta_y = 0;
+
+// Zmienne zwiazane z modelem jajka
+const int N = 40;
+point3 points[N + 1][N + 1];
+point3 normal_vectors[N + 1][N + 1];
+point2 texture_points[N + 1][N + 1];
+
+
+float random() {
+    return (float)rand() / RAND_MAX;
+}
+
+GLbyte* LoadTGAImage(const char* FileName, GLint* ImWidth, GLint* ImHeight, GLint* ImComponents, GLenum* ImFormat) {
+
+    #pragma pack(1)           
+        typedef struct
+        {
+            GLbyte    idlength;
+            GLbyte    colormaptype;
+            GLbyte    datatypecode;
+            unsigned short    colormapstart;
+            unsigned short    colormaplength;
+            unsigned char     colormapdepth;
+            unsigned short    x_orgin;
+            unsigned short    y_orgin;
+            unsigned short    width;
+            unsigned short    height;
+            GLbyte    bitsperpixel;
+            GLbyte    descriptor;
+        }TGAHEADER;
+
+    #pragma pack(8)
+    FILE* pFile;
+    TGAHEADER tgaHeader;
+    unsigned long lImageSize;
+    short sDepth;
+    GLbyte* pbitsperpixel = NULL;
+
+    *ImWidth = 0;
+    *ImHeight = 0;
+    *ImFormat = GL_BGR_EXT;
+    *ImComponents = GL_RGB8;
+
+    pFile = fopen(FileName, "rb");
+    if (pFile == NULL)
+        return NULL;
+
+    fread(&tgaHeader, sizeof(TGAHEADER), 1, pFile);
+
+    *ImWidth = tgaHeader.width;
+    *ImHeight = tgaHeader.height;
+    sDepth = tgaHeader.bitsperpixel / 8;
+
+    if (tgaHeader.bitsperpixel != 8 && tgaHeader.bitsperpixel != 24 && tgaHeader.bitsperpixel != 32)
+        return NULL;
+
+    lImageSize = tgaHeader.width * tgaHeader.height * sDepth;
+
+    pbitsperpixel = (GLbyte*)malloc(lImageSize * sizeof(GLbyte));
+
+    if (pbitsperpixel == NULL)
+        return NULL;
+
+    if (fread(pbitsperpixel, lImageSize, 1, pFile) != 1) {
+        free(pbitsperpixel);
+        return NULL;
+    }
+
+
+    switch (sDepth) {
+    case 3:
+        *ImFormat = GL_BGR_EXT;
+        *ImComponents = GL_RGB8;
+        break;
+    case 4:
+        *ImFormat = GL_BGRA_EXT;
+        *ImComponents = GL_RGBA8;
+        break;
+    case 1:
+        *ImFormat = GL_LUMINANCE;
+        *ImComponents = GL_LUMINANCE8;
+        break;
+    };
+
+    fclose(pFile);
+    return pbitsperpixel;
+}
+
+
+void drawEgg() {
+    for (int i = 0; i < N; ++i) {
+        for (int j = 0; j < N; ++j) {
+            glBegin(GL_TRIANGLES);
+            glNormal3fv(normal_vectors[i][j]);
+            glTexCoord2fv(texture_points[i][j]);
+            glVertex3fv(points[i][j]);
+
+            glNormal3fv(normal_vectors[i + 1][j]);
+            glTexCoord2fv(texture_points[i + 1][j]);
+            glVertex3fv(points[i + 1][j]);
+
+            glNormal3fv(normal_vectors[i + 1][j + 1]);
+            glTexCoord2fv(texture_points[i + 1][j + 1]);
+            glVertex3fv(points[i + 1][j + 1]);
+            glEnd();
+
+            glBegin(GL_TRIANGLES);
+            glNormal3fv(normal_vectors[i][j]);
+            glTexCoord2fv(texture_points[i][j]);
+            glVertex3fv(points[i][j]);
+
+            glNormal3fv(normal_vectors[i][j + 1]);
+            glTexCoord2fv(texture_points[i][j + 1]);
+            glVertex3fv(points[i][j + 1]);
+
+            glNormal3fv(normal_vectors[i + 1][j + 1]);
+            glTexCoord2fv(texture_points[i + 1][j + 1]);
+            glVertex3fv(points[i + 1][j + 1]);
+            glEnd();
+        }
+    }
+}
+
+
+void RenderScene(void) {
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glLoadIdentity();
+
+    const float ROTATION_SPEDD = 0.05f;
+
+    gluLookAt(viewer[0], viewer[1], viewer[2], 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
+
+    if (left_pressed) {
+        rotation_x += (delta_x * pixels2angle) * ROTATION_SPEDD;
+        rotation_y += (delta_y * pixels2angle) * ROTATION_SPEDD;
+    }
+
+    if (right_pressed) {
+        viewer[2] += (delta_x / 100.f);
+    }
+
+    glRotatef(rotation_x, 0.0, 1.0, 0.0);
+    glRotatef(rotation_y, 1.0, 0.0, 0.0);
+
+    drawEgg();
+
+    glFlush();
+    glutSwapBuffers();
+}
+
+
+void MyInit(void) {
+    GLbyte* pBytes;
+    GLint ImWidth, ImHeight, ImComponents;
+    GLenum ImFormat;
+
+    //glEnable(GL_CULL_FACE);
+    pBytes = LoadTGAImage("textury/D1_t.tga", &ImWidth, &ImHeight, &ImComponents, &ImFormat);
+    glTexImage2D(GL_TEXTURE_2D, 0, ImComponents, ImWidth, ImHeight, 0, ImFormat, GL_UNSIGNED_BYTE, pBytes);
+    free(pBytes);
+    glEnable(GL_TEXTURE_2D);
+    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    GLfloat mat_ambient[] = { 1.0, 1.0, 1.0, 1.0 };
+    GLfloat mat_diffuse[] = { 1.0, 1.0, 1.0, 1.0 };
+    GLfloat mat_specular[] = { 1.0, 1.0, 1.0, 1.0 };
+    GLfloat mat_shininess = { 20.0 };
+
+    GLfloat light_position[] = { 0.0, 0.0, 10.0, 1.0 };
+    GLfloat light_ambient[] = { 1.0, 1.0, 1.0, 1.0 };
+    GLfloat light_diffuse[] = { 1.0, 1.0, 1.0, 1.0 };
+    GLfloat light_specular[] = { 1.0, 1.0, 1.0, 1.0 };
+
+    GLfloat att_constant = { 1.0 };
+    GLfloat att_linear = { 0.05 };
+    GLfloat att_quadratic = { 0.001 };
+
+    glMaterialfv(GL_FRONT, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT, GL_AMBIENT, mat_ambient);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE, mat_diffuse);
+    glMaterialf(GL_FRONT, GL_SHININESS, mat_shininess);
+
+    glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, light_specular);
+    glLightfv(GL_LIGHT0, GL_POSITION, light_position);
+
+    glLightf(GL_LIGHT0, GL_CONSTANT_ATTENUATION, att_constant);
+    glLightf(GL_LIGHT0, GL_LINEAR_ATTENUATION, att_linear);
+    glLightf(GL_LIGHT0, GL_QUADRATIC_ATTENUATION, att_quadratic);
+
+    glShadeModel(GL_SMOOTH);
+    glEnable(GL_LIGHTING);
+    glEnable(GL_LIGHT0);
+    glEnable(GL_DEPTH_TEST);
+
+    /*************************************************************************************/
+    const float offset = 1.0f / N;
+
+    float v = 0.0f;
+    float u = 0.0f;
+
+    float x_u, x_v, y_u, y_v, z_u, z_v;
+
+    for (int i = 0; i < N; ++i) {
+        u = 0.0f;
+
+        for (int j = 0; j < N; ++j) {
+            // Generowanie punktow w przestrzeni
+            points[i][j][0] =
+                (-90 * pow(u, 5) + 225 * pow(u, 4) - 270 * pow(u, 3) + 180 * pow(u, 2) - 45 * u) * cos(PI * v);
+            points[i][j][1] =
+                (160 * pow(u, 4) - 320 * pow(u, 3) + 160 * pow(u, 2)) - 5;
+            points[i][j][2] =
+                (-90 * pow(u, 5) + 225 * pow(u, 4) - 270 * pow(u, 3) + 180 * pow(u, 2) - 45 * u) * sin(PI * v);
+
+            // Generowanie punktow w przestrzeni dla tekstury
+            texture_points[i][j][0] =
+                (-90 * pow(u, 5) + 225 * pow(u, 4) - 270 * pow(u, 3) + 180 * pow(u, 2) - 45 * u) * cos(PI * v);
+            texture_points[i][j][1] =
+                (160 * pow(u, 4) - 320 * pow(u, 3) + 160 * pow(u, 2)) - 5;
+            texture_points[i][j][2] =
+                (-90 * pow(u, 5) + 225 * pow(u, 4) - 270 * pow(u, 3) + 180 * pow(u, 2) - 45 * u) * sin(PI * v);
+
+            // Generowanie wektora normalnego do zadanego punktu
+            x_u = (-450 * pow(u, 4) + 900 * pow(u, 3) - 810 * pow(u, 2) + 360 * u - 45) * cos(PI * v);
+            x_v = PI * (90 * pow(u, 5) - 225 * pow(u, 4) + 270 * pow(u, 3) - 180 * pow(u, 2) + 45 * u) * sin(PI * v);
+            y_u = 640 * pow(u, 3) - 960 * pow(u, 2) + 320 * u;
+            y_v = 0;
+            z_u = (-450 * pow(u, 4) + 900 * pow(u, 3) - 810 * pow(u, 2) + 360 * u - 45) * sin(PI * v);
+            z_v = -PI * (90 * pow(u, 5) - 225 * pow(u, 4) + 270 * pow(u, 3) - 180 * pow(u, 2) + 45 * u) * cos(PI * v);
+
+            normal_vectors[i][j][0] = y_u * z_v - z_u * y_v;
+            normal_vectors[i][j][1] = z_u * x_v - x_u * z_v;
+            normal_vectors[i][j][2] = x_u * y_v - y_u * x_v;
+
+            if (j == 0) {
+                normal_vectors[i][j][0] = 0;
+                normal_vectors[i][j][1] = -1;
+                normal_vectors[i][j][2] = 0;
+            }
+            else if (j == N / 2) {
+                normal_vectors[i][j][0] = 0;
+                normal_vectors[i][j][1] = 1;
+                normal_vectors[i][j][2] = 0;
+            }
+            else if (j > N / 2) {
+                normal_vectors[i][j][0] *= -1;
+                normal_vectors[i][j][1] *= -1;
+                normal_vectors[i][j][2] *= -1;
+            }
+
+            // Normalizacja wektora
+            float vector_lenght = sqrt(pow(normal_vectors[i][j][0], 2) + pow(normal_vectors[i][j][1], 2) + pow(normal_vectors[i][j][2], 2));
+            normal_vectors[i][j][0] /= vector_lenght;
+            normal_vectors[i][j][1] /= vector_lenght;
+            normal_vectors[i][j][2] /= vector_lenght;
+
+            u += offset;
+        }
+        v += offset;
+    }
+
+    for (int i = 0; i < N; ++i) {
+        // Generowanie punktow mostkowych
+        points[N][i][0] = points[0][N - i][0];
+        points[N][i][1] = points[0][N - i][1];
+        points[N][i][2] = points[0][N - i][2];
+
+        points[i][N][0] = points[i][0][0];
+        points[i][N][1] = points[i][0][1];
+        points[i][N][2] = points[i][0][2];
+
+        texture_points[N][i][0] = texture_points[0][N - i][0];
+        texture_points[N][i][1] = texture_points[0][N - i][1];
+        texture_points[N][i][2] = texture_points[0][N - i][2];
+
+        texture_points[i][N][0] = texture_points[i][0][0];
+        texture_points[i][N][1] = texture_points[i][0][1];
+        texture_points[i][N][2] = texture_points[i][0][2];
+
+        // Generowanie wektorow normalnych mostkowych
+        normal_vectors[N][i][0] = normal_vectors[0][N - i][0];
+        normal_vectors[N][i][1] = normal_vectors[0][N - i][1];
+        normal_vectors[N][i][2] = normal_vectors[0][N - i][2];
+
+        normal_vectors[i][N][0] = normal_vectors[i][0][0];
+        normal_vectors[i][N][1] = normal_vectors[i][0][1];
+        normal_vectors[i][N][2] = normal_vectors[i][0][2];
+    }
+
+    points[N][N][0] = points[0][0][0];
+    points[N][N][1] = points[0][0][1];
+    points[N][N][2] = points[0][0][2];
+
+    texture_points[N][N][0] = texture_points[0][0][0];
+    texture_points[N][N][1] = texture_points[0][0][1];
+    texture_points[N][N][2] = texture_points[0][0][2];
+
+    normal_vectors[N][N][0] = normal_vectors[0][0][0];
+    normal_vectors[N][N][1] = normal_vectors[0][0][1];
+    normal_vectors[N][N][2] = normal_vectors[0][0][2];
+}
+
+
+void ChangeSize(GLsizei horizontal, GLsizei vertical) {
+    pixels2angle = (float)horizontal / 360.f;
+
+    glMatrixMode(GL_PROJECTION);
+    glLoadIdentity();
+
+    gluPerspective(70, 1.0, 1.0, 30.0);
+    // Ustawienie parametrow dla rzutu perspektywicznego
+
+    if (horizontal <= vertical)
+        glViewport(0, (vertical - horizontal) / 2, horizontal, horizontal);
+    else
+        glViewport((horizontal - vertical) / 2, 0, vertical, vertical);
+
+
+    glMatrixMode(GL_MODELVIEW);
+    glLoadIdentity();
+}
+
+
+void Mouse(int btn, int state, int x, int y) {
+    if (btn == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+        x_pos_old = x;
+        y_pos_old = y;
+
+        left_pressed = true;
+    }
+    else {
+        left_pressed = false;
+    }
+
+    if (btn == GLUT_RIGHT_BUTTON && state == GLUT_DOWN) {
+        x_pos_old = x;
+
+        right_pressed = true;
+    }
+    else {
+        right_pressed = false;
+    }
+}
+
+
+void Motion(GLsizei x, GLsizei y) {
+    delta_x = x - x_pos_old;
+    delta_y = y - y_pos_old;
+
+    x_pos_old = x;
+    y_pos_old = y;
+
+    glutPostRedisplay();
+}
+
+
+void main(void) {
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH);
+    glutInitWindowSize(1000, 1000);
+    glutCreateWindow("Oswietlenie - jedno zrodlo swiatla");
+    glutDisplayFunc(RenderScene);
+    glutReshapeFunc(ChangeSize);
+    glutMouseFunc(Mouse);
+    glutMotionFunc(Motion);
+    MyInit();
+    glEnable(GL_DEPTH_TEST);
+    glutMainLoop();
+}
